@@ -35,11 +35,11 @@ if menu.first and menu.dir and menu.output:
 	
 	if nessus_files.__contains__(os.path.basename(files[0])):
 		nessus_files.remove(os.path.basename(files[0]))
-	for file in nessus_files:
-		files.append(os.path.join(dir_nessus, file))
+	for nes_file in nessus_files:
+		files.append(os.path.join(dir_nessus, nes_file))
 	
-	for file in files:
-		nessus_xml = open(file, 'r').read()
+	for nes_file in files:
+		nessus_xml = open(nes_file, 'r').read()
 		if counter == 0:
 			# first Nessus scan
 			first_dom = xml.dom.minidom.parseString(nessus_xml)
@@ -51,6 +51,7 @@ if menu.first and menu.dir and menu.output:
 				test = dom.getElementsByTagName('ReportHost')
 			except:
 				# if no element "ReportHost", skip this
+				print "Could not parse %s" %nes_file
 				continue
 			for host in dom.getElementsByTagName('ReportHost'):
 				scan_result.append(host)

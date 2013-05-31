@@ -12,19 +12,19 @@ by Roy Firestein [roy**AT**firestein.net]
 REQUIREMENTS:
 You need to include the following libraries:
 1. python-nessus
-2. ipaddr
+2. netaddr
 
 
 Tested with Nessus 5.
 
 '''
 
-import sys, os
+import sys, os, re
 import time
 try:
-	import ipaddr
+	import netaddr
 except ImportError:
-	print "Error:\nipaddr missing.\nInstall using: 'pip install ipaddr'\n"
+	print "Error:\nipaddr missing.\nInstall using: 'pip install netaddr'\n"
 	sys.exit(0)
 
 try:
@@ -49,6 +49,7 @@ class AutoNessus(nessus.NessusConnection):
 		self.group_size = kwargs.get("group_size", 16)
 		self.verbose = kwargs.get("verbose", False)
 		self.index_counter = kwargs.get("index_counter", 0)
+		self.notification = kwargs.get("notification", True)
 	
 	def start_scan(self, policy_id):
 		if not len(self.targets) > 0:
@@ -81,8 +82,10 @@ class AutoNessus(nessus.NessusConnection):
 			### Stuff
 			self.increment_counter()
 			if self.all_scans_are_finished():
+				self.scan = None
 				self.print_green("[*] Scan completed.")
-				self.send_notification()
+				if self.notification:
+					self.send_notification()
 				break
 		
 		self.print_blue("[+] Finished scanning all targets!")
@@ -131,18 +134,48 @@ class AutoNessus(nessus.NessusConnection):
 	
 	def parse_targets(self, targets_file):
 		self.raw_targets = open(targets_file, 'r').readlines()
-		for net in self.raw_targets:
-			subnet = ipaddr.IPv4Network(net)
-			v4list = [str(x) for x in subnet if x._version == 4]
-			for chunk in self.chunks(v4list, self.group_size):
-				self.targets.append(chunk)
+		re_range = re.compile('^(?P<ip>\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}-\d{1,3})$')
+		re_net = re.compile('^(?P<net>\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/\d{1,2})$')
+		re_single = re.compile('^(?P<ip>\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$')
+		ip_list = []
+		''' detect if IP is a range, network or single host '''
+		for line in self.raw_targets:
+			line = line.strip()
+			if re_net.match(line):
+				# Network
+				network = netaddr.IPNetwork(line)
+				v4list = [str(x) for x in network if x.version == 4]
+				for ip in v4list:
+					ip_list.append(ip)
+			elif re_single.match(line):
+				# Single IP
+				ip_list.append(line)
+			elif re_range.match(line):
+				# IP range
+				iprange = netaddr.iter_nmap_range(line)
+				for ip in iprange:
+					ip = str(ip)
+					ip_list.append(ip)
+		# Break into specified groups size
+		self.targets = [ chunk for chunk in self.chunks(ip_list, self.group_size) ]
+		if len(self.targets) > 0:
+			if self.verbose:
+				self.print_blue("[+] Targets loaded successfully.")
+		else:
+			print "[+] Error loading targets."
+			sys.exit(1)
 	
 	def save_report(self, scan_uuid, file_name):
-		fname = "%s%s.nessus" %(self.output_dir, file_name)
-		outfile = open(fname , 'w')
-		self.check_auth()
-		self.download_report(scan_uuid, outfile)
-		outfile.close()
+		while True:
+			try:
+				fname = "%s%s.nessus" %(self.output_dir, file_name)
+				outfile = open(fname , 'w')
+				self.check_auth()
+				self.download_report(scan_uuid, outfile)
+				outfile.close()
+				break
+			except:
+				self.check_auth(force=True)
 		
 	def increment_counter(self):
 		self.index_counter = self.index_counter + 1
@@ -177,8 +210,8 @@ class AutoNessus(nessus.NessusConnection):
 		return [l[i:i+n] for i in range(0, len(l), n)]
 
 	def send_notification(self):
-		os.system("curl -s fireste.in/ping/nessusscan/")
-		print "Notification sent."
+		# Can insert SMS or email notification code here
+		pass
 	
 	def print_blue(self, text):
 		print '\033[94m' + "%s" %text + '\033[0m'
@@ -217,6 +250,7 @@ def main():
 	extra.add_option("-g", "--group",  action="store", type="int", dest="group", help="Group size of IPs to scan", default=16)
 	extra.add_option("-i", "--index",  action="store", type="int", dest="index", help="Scan index starts from 0", default=0)
 	extra.add_option("-v", "--verbose",  action="store_true", dest="verbose", help="Show extra information")
+	extra.add_option("-a", "--alert",  action="store_true", dest="alert", help="Send alert when done", default=True)
 	parser.add_option_group(extra)
 	(menu, args) = parser.parse_args()
 	
@@ -240,6 +274,7 @@ def main():
 				scanner.index_counter = menu.index
 				scanner.name = menu.name
 				scanner.output_dir = menu.directory
+				scanner.notification = menu.alert
 				scanner.parse_targets(menu.targets)
 				policy_id = args[1]
 				scanner.start_scan(policy_id)
@@ -251,5 +286,5 @@ def main():
 
 if __name__ == "__main__":
 	main()
-	
-exit
+
+
